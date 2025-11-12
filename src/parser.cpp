@@ -59,10 +59,6 @@ Expr List::parse(Assoc &env) {
     if (stxs.empty()) {
         return Expr(new Quote(Syntax(new List())));
     }
-
-    //TODO: check if the first element is a symbol
-    //If not, use Apply function to package to a closure;
-    //If so, find whether it's a variable or a keyword;
     SymbolSyntax *id = dynamic_cast<SymbolSyntax*>(stxs[0].get());
     if (id == nullptr) {
         std::vector<Expr> parameters;
@@ -93,7 +89,9 @@ Expr List::parse(Assoc &env) {
             return Expr(new MultVar(parameters));
         }  else if (op_type == E_DIV) {
             return Expr(new DivVar(parameters));
-        } else if (op_type == E_MODULO) {
+        }else if (op_type == E_EXPT) {
+            return Expr(new Expt(stxs[1]->parse(env), stxs[2]->parse(env)));
+        }else if (op_type == E_MODULO) {
             if (parameters.size() != 2) {
                 throw RuntimeError("Wrong number of arguments for modulo");
             }
@@ -117,6 +115,45 @@ Expr List::parse(Assoc &env) {
         } else if(op_type == E_EXIT){
             if (stxs.size() != 1) throw RuntimeError("exit takes no arguments");
             return Expr(new Exit());
+        }else if(op_type == E_CONS){
+            if (stxs.size() != 3)
+                throw RuntimeError("cons requires 2 arguments");
+            Expr e1 = stxs[1]->parse(env);
+            Expr e2 = stxs[2]->parse(env);
+            return Expr(new Cons(e1, e2));
+        }else if(op_type == E_CAR){
+            if (stxs.size() != 2)
+                throw RuntimeError("car requires 1 argument");
+            Expr e = stxs[1]->parse(env);
+            return Expr(new Car(e));
+        }else if(op_type == E_CDR){
+            if (stxs.size() != 2)
+                throw RuntimeError("cdr requires 1 argument");
+            Expr e = stxs[1]->parse(env);
+            return Expr(new Cdr(e));
+        }else if(op_type == E_VOID){
+            return Expr(new MakeVoid());
+        }else if(op_type == E_PAIRQ){
+            if (stxs.size() != 2)
+                throw RuntimeError("pair? requires 1 argument");
+            Expr e = stxs[1]->parse(env);
+            return Expr(new IsPair(e));
+        }else if(op_type == E_BOOLQ){
+            return Expr(new IsBoolean(stxs[1]->parse(env)));
+        }else if(op_type == E_NULLQ){
+            return Expr(new IsNull(stxs[1]->parse(env)));
+        }else if(op_type == E_INTQ){
+            return Expr(new IsFixnum(stxs[1]->parse(env)));
+        }else if(op_type == E_PROCQ){
+            return Expr(new IsProcedure(stxs[1]->parse(env)));
+        }else if(op_type == E_SYMBOLQ){
+            return Expr(new IsSymbol(stxs[1]->parse(env)));
+        }else if(op_type == E_LISTQ){
+            return Expr(new IsList(stxs[1]->parse(env)));
+        }else if (op_type == E_STRINGQ) {
+            return Expr(new IsString(stxs[1]->parse(env)));
+        }else if (op_type == E_EQQ) {
+            return Expr(new IsEq(stxs[1]->parse(env), stxs[2]->parse(env)));
         }
         else {
             throw RuntimeError("Unhandled primitive: " + op);
@@ -124,6 +161,7 @@ Expr List::parse(Assoc &env) {
     }
 
     if (reserved_words.count(op) != 0) {
+        if (!op.empty() && reserved_words.count(op) != 0 && find(op, env).get() == nullptr){
     	switch (reserved_words[op]) {
 			case E_IF:
             if (stxs.size() != 4) throw RuntimeError("if requires 3 arguments");
@@ -144,25 +182,10 @@ Expr List::parse(Assoc &env) {
             return Expr(new Define(id->s, stxs[2]->parse(env)));
         }
         case E_LAMBDA: {
-            if (stxs.size() < 3) throw RuntimeError("lambda requires parameters and body");
-            List *paramList = dynamic_cast<List*>(stxs[1].get());
-            if (!paramList) throw RuntimeError("lambda parameters must be a list");
-            std::vector<std::string> params;
-            for (auto &p : paramList->stxs) {
-                SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(p.get());
-                if (!sym) throw RuntimeError("lambda parameter must be a symbol");
-                params.push_back(sym->s);
-            }
-            Expr body(nullptr);
-            if (stxs.size() == 3) {
-                body = stxs[2]->parse(env);
-            } else {
-                std::vector<Expr> es;
-                for (size_t i = 2; i < stxs.size(); ++i)
-                    es.push_back(stxs[i]->parse(env));
-                body = Expr(new Begin(es));
-            }
-            return Expr(new Lambda(params, body));
+            
+
+
+            
         }
         case E_SET: {
             if (stxs.size() != 3) throw RuntimeError("set requires 2 arguments");
@@ -225,6 +248,7 @@ Expr List::parse(Assoc &env) {
         	default:
             	throw RuntimeError("Unknown reserved word: " + op);
     	}
+        }
     }
 
     Expr rator_expr = stxs[0]->parse(env);

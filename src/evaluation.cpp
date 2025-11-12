@@ -569,9 +569,42 @@ Value Begin::eval(Assoc &e) {
     return result;
 }
 
+
+static Value syntaxToValue(const Syntax &syn) {
+    SyntaxBase *base = syn.get();
+    if (auto num = dynamic_cast<Number*>(base)) {
+        return IntegerV(num->n);
+    }
+    if (auto rat = dynamic_cast<RationalSyntax*>(base)) {
+        return RationalV(rat->numerator, rat->denominator);
+    }
+    if (dynamic_cast<TrueSyntax*>(base)) {
+        return BooleanV(true);
+    }
+    if (dynamic_cast<FalseSyntax*>(base)) {
+        return BooleanV(false);
+    }
+    if (auto str = dynamic_cast<StringSyntax*>(base)) {
+        return StringV(str->s);
+    }
+    if (auto sym = dynamic_cast<SymbolSyntax*>(base)) {
+        return SymbolV(sym->s);
+    }
+    if (auto list = dynamic_cast<List*>(base)) {
+        if (list->stxs.empty())
+            return NullV();
+        Value result = NullV();
+        // 从尾到头构建 Pair
+        for (int i = (int)list->stxs.size() - 1; i >= 0; --i) {
+            result = PairV(syntaxToValue(list->stxs[i]), result);
+        }
+        return result;
+    }
+    return VoidV(); // fallback
+}
+
 Value Quote::eval(Assoc& e) {
-    Expr inner = s.parse(e);
-    return inner->eval(e);
+    return syntaxToValue(s);
 }
 
 Value AndVar::eval(Assoc &e) { // and with short-circuit evaluation
@@ -632,31 +665,54 @@ Value Cond::eval(Assoc &env) {
 }
 
 Value Lambda::eval(Assoc &env) { 
-    return ProcedureV(x, e, env);
+    std::vector<std::string> params;
+    for (size_t i = 0; i < x.size(); ++i) {
+        params.push_back(x[i]);
+    }
+    return Value(new Procedure(params, e, env));
 }
 
 Value Apply::eval(Assoc &e) {
-     Value proc_val = rator->eval(e);
+    Value proc_val = rator->eval(e);
     if (proc_val->v_type != V_PROC) {
-        throw std::runtime_error("Attempt to apply a non-procedure");
+        throw RuntimeError("Attempt to apply a non-procedure");
     }
     Procedure* clos_ptr = dynamic_cast<Procedure*>(proc_val.get());
-    if (!clos_ptr) throw std::runtime_error("Invalid procedure closure");
+    if (!clos_ptr) throw RuntimeError("Invalid procedure closure");
     std::vector<Value> args;
     for (auto &arg_expr : rand) {
         args.push_back(arg_expr->eval(e));
     }
-    if (auto varNode = dynamic_cast<Variadic*>(clos_ptr->e.get())) {
-        std::vector<Value> var_args;
-        for (auto &v : args) var_args.push_back(v);
-        args.clear();
-        args.push_back(PairV(NullV(), NullV()));
-    }
+
     Assoc param_env = clos_ptr->env;
-    for (size_t i = 0; i < clos_ptr->parameters.size(); ++i) {
+    size_t fixed_param_count = clos_ptr->parameters.size();
+    bool is_variadic = false;
+    if (!clos_ptr->parameters.empty() && clos_ptr->parameters.back() == "...") {
+        is_variadic = true;
+        fixed_param_count--;
+    }
+
+    if (!is_variadic && args.size() != fixed_param_count) {
+        throw RuntimeError("Argument count mismatch");
+    }
+    for (size_t i = 0; i < fixed_param_count; ++i) {
         param_env = extend(clos_ptr->parameters[i], args[i], param_env);
     }
 
+    if (is_variadic) {
+        std::vector<Value> var_args;
+        for (size_t i = fixed_param_count; i < args.size(); ++i) {
+            var_args.push_back(args[i]);
+        }
+
+        Value var_list = NullV();
+        for (size_t i = var_args.size(); i-- > 0;) {
+            var_list = PairV(var_args[i], var_list);
+        }
+
+        std::string var_param_name = clos_ptr->parameters.back();
+        param_env = extend(var_param_name, var_list, param_env);
+    }
     return clos_ptr->e->eval(param_env);
 }
 
