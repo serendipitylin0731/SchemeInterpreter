@@ -182,10 +182,25 @@ Expr List::parse(Assoc &env) {
             return Expr(new Define(id->s, stxs[2]->parse(env)));
         }
         case E_LAMBDA: {
-            
-
-
-            
+            if (stxs.size() < 3) throw RuntimeError("lambda requires parameters and body");
+            List *paramList = dynamic_cast<List*>(stxs[1].get());
+            if (!paramList) throw RuntimeError("lambda parameters must be a list");
+            std::vector<std::string> params;
+            for (auto &p : paramList->stxs) {
+                SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(p.get());
+                if (!sym) throw RuntimeError("lambda parameter must be a symbol");
+                params.push_back(sym->s);
+            }
+            Expr body(nullptr);
+            if (stxs.size() == 3) {
+                body = stxs[2]->parse(env);
+            } else {
+                std::vector<Expr> es;
+                for (size_t i = 2; i < stxs.size(); ++i)
+                    es.push_back(stxs[i]->parse(env));
+                body = Expr(new Begin(es));
+            }
+            return Expr(new Lambda(params, body));
         }
         case E_SET: {
             if (stxs.size() != 3) throw RuntimeError("set requires 2 arguments");
