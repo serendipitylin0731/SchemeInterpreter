@@ -206,7 +206,7 @@ Expr List::parse(Assoc &env) {
             case E_GE: return Expr(new GreaterEqVar(ps));
             case E_GT: return Expr(new GreaterVar(ps));
             case E_LIST: return Expr(new ListFunc(ps));
-            case E_VOID: return Expr(new MakeVoid());
+            case E_VOID: if (ps.size()!=0) throw RuntimeError("void requires 1");return Expr(new MakeVoid());
             case E_EXPT: if (ps.size()!=2) throw RuntimeError("expt requires 2"); return Expr(new Expt(ps[0], ps[1]));
             case E_MODULO: if (ps.size()!=2) throw RuntimeError("modulo requires 2"); return Expr(new Modulo(ps[0], ps[1]));
             case E_CONS: if (ps.size()!=2) throw RuntimeError("cons requires 2"); return Expr(new Cons(ps[0], ps[1]));
