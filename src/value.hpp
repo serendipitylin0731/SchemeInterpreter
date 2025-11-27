@@ -183,9 +183,18 @@ struct Procedure : ValueBase {
     std::vector<std::string> parameters;   ///< Parameter names
     Expr e;                                ///< Function body expression
     Assoc env;                             ///< Closure environment
-    Procedure(const std::vector<std::string> &, const Expr &, const Assoc &);
+    bool is_variadic;                      ///< Whether the procedure is variadic
+    
+    // 原有的构造函数
+    Procedure(const std::vector<std::string> &params, const Expr &body, const Assoc &environment);
+    
+    // 新的构造函数，支持可变参数
+    Procedure(const std::vector<std::string> &params, const Expr &body, const Assoc &environment, bool variadic);
+    
     virtual void show(std::ostream &) override;
 };
+
+
 Value ProcedureV(const std::vector<std::string> &, const Expr &, const Assoc &);
 
 // ============================================================================

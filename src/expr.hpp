@@ -2,13 +2,7 @@
 #define EXPRESSION
 
 /**
- * @file eclass RationalNum : public ExprBase {
-public:
-    int numerator;
-    int denominator;
-    RationalNum(int num, int den);
-    virtual Value eval(Assoc &) override;
-};p
+ * @file expr.hpp
  * @brief Expression structures for the Scheme interpreter
  * @author luke36
  * 
@@ -392,7 +386,9 @@ struct Apply : ExprBase {
 struct Lambda : ExprBase {
     std::vector<std::string> x;
     Expr e;
+    bool is_variadic;  // 添加可变参数支持
     Lambda(const std::vector<std::string> &, const Expr &);
+    Lambda(const std::vector<std::string> &, const Expr &, bool variadic);
     virtual Value eval(Assoc &) override;
 };
 

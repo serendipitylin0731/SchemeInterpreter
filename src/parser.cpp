@@ -46,19 +46,16 @@ Expr SymbolSyntax::parse(Assoc &env) {
 }
 
 /*********************************************
- * 核心：List::parse —— 支持关键字/变量混用
+ * 核心：List::parse
  *********************************************/
-Expr List::parse(Assoc &env)
-{
+Expr List::parse(Assoc &env) {
     if (stxs.empty()) {
-        // 空列表当作 (quote ())
         return Expr(new Quote(Syntax(new List())));
     }
 
     SyntaxBase *headPtr = stxs[0].ptr.get();
     SymbolSyntax *headSym = dynamic_cast<SymbolSyntax*>(headPtr);
 
-    // 如果首元素不是 Symbol => 普通函数调用
     if (!headSym) {
         Expr rator = stxs[0].parse(env);
         vector<Expr> args;
@@ -68,10 +65,14 @@ Expr List::parse(Assoc &env)
     }
 
     string op = headSym->s;
-    bool shadowed = find(op, env).get() != nullptr; // 检查环境是否已有绑定
+    
+    bool is_bound = false;
+    Value bound_value = find(op, env);
+    if (bound_value.get() != nullptr) {
+        is_bound = true;
+    }
 
-    // --- 如果未 shadowed 且是关键字，则当关键字解析 ---
-    if (!shadowed && reserved_words.count(op)) {
+    if (!is_bound && reserved_words.count(op)) {
         ExprType kw = reserved_words[op];
         switch (kw) {
             case E_IF:
@@ -92,14 +93,23 @@ Expr List::parse(Assoc &env)
                 return Expr(new Quote(stxs[1]));
             case E_LAMBDA: {
                 if (stxs.size() < 3) throw RuntimeError("lambda needs params & body");
+                
+                vector<string> params;
+                bool is_variadic = false;
+                
                 List *plist = dynamic_cast<List*>(stxs[1].ptr.get());
                 if (!plist) throw RuntimeError("lambda parameters must be list");
 
-                vector<string> params;
-                for (auto &p : plist->stxs) {
-                    SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(p.ptr.get());
-                    if (!sym) throw RuntimeError("lambda param not symbol");
-                    params.push_back(sym->s);
+                for (size_t i = 0; i < plist->stxs.size(); ++i) {
+                    if (auto sym = dynamic_cast<SymbolSyntax*>(plist->stxs[i].ptr.get())) {
+                        if (sym->s == "..." && i == plist->stxs.size() - 1) {
+                            is_variadic = true;
+                        } else {
+                            params.push_back(sym->s);
+                        }
+                    } else {
+                        throw RuntimeError("lambda param must be symbol");
+                    }
                 }
 
                 Expr body(nullptr);
@@ -111,7 +121,7 @@ Expr List::parse(Assoc &env)
                         bs.push_back(stxs[i].parse(env));
                     body = Expr(new Begin(bs));
                 }
-                return Expr(new Lambda(params, body));
+                return Expr(new Lambda(params, body, is_variadic));
             }
             case E_DEFINE: {
                 if (stxs.size() != 3) throw RuntimeError("define requires 2 args");
@@ -139,6 +149,7 @@ Expr List::parse(Assoc &env)
                         throw RuntimeError("each let/letrec binding must be (id expr)");
                     SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(pairList->stxs[0].ptr.get());
                     if (!sym) throw RuntimeError("binding first element must be symbol");
+                    
                     binds.push_back({sym->s, pairList->stxs[1].parse(env)});
                 }
 
@@ -161,13 +172,24 @@ Expr List::parse(Assoc &env)
                 }
                 return Expr(new Cond(clauses));
             }
+            case E_AND: {
+                vector<Expr> es;
+                for (size_t i = 1; i < stxs.size(); ++i)
+                    es.push_back(stxs[i].parse(env));
+                return Expr(new AndVar(es));
+            }
+            case E_OR: {
+                vector<Expr> es;
+                for (size_t i = 1; i < stxs.size(); ++i)
+                    es.push_back(stxs[i].parse(env));
+                return Expr(new OrVar(es));
+            }
             default:
                 throw RuntimeError("unknown keyword " + op);
         }
     }
 
-    // --- primitive function --- 
-    if (primitives.count(op)) {
+    if (!is_bound && primitives.count(op)) {
         vector<Expr> ps;
         for (size_t i = 1; i < stxs.size(); ++i)
             ps.push_back(stxs[i].parse(env));
@@ -183,8 +205,6 @@ Expr List::parse(Assoc &env)
             case E_EQ: return Expr(new EqualVar(ps));
             case E_GE: return Expr(new GreaterEqVar(ps));
             case E_GT: return Expr(new GreaterVar(ps));
-            case E_AND: return Expr(new AndVar(ps));
-            case E_OR: return Expr(new OrVar(ps));
             case E_LIST: return Expr(new ListFunc(ps));
             case E_VOID: return Expr(new MakeVoid());
             case E_EXPT: if (ps.size()!=2) throw RuntimeError("expt requires 2"); return Expr(new Expt(ps[0], ps[1]));
@@ -202,11 +222,12 @@ Expr List::parse(Assoc &env)
             case E_PROCQ: if (ps.size()!=1) throw RuntimeError("procedure? requires 1"); return Expr(new IsProcedure(ps[0]));
             case E_NULLQ: if (ps.size()!=1) throw RuntimeError("null? requires 1"); return Expr(new IsNull(ps[0]));
             case E_EXIT: if (stxs.size()!=1) throw RuntimeError("exit takes no args"); return Expr(new Exit());
+            case E_DISPLAY: if (ps.size()!=1) throw RuntimeError("display requires 1"); return Expr(new Display(ps[0]));
+            case E_NOT: if (ps.size()!=1) throw RuntimeError("not requires 1"); return Expr(new Not(ps[0]));
             default: throw RuntimeError("unknown primitive op " + op);
         }
     }
 
-    // --- fallback 普通变量应用 ---
     {
         Expr rator = stxs[0].parse(env);
         vector<Expr> args;

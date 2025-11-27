@@ -66,14 +66,7 @@ Value Variadic::eval(Assoc &e) { // evaluation of multi-operator primitive
 }
 
 Value Var::eval(Assoc &e) { // evaluation of variable
-    // TODO: TO identify the invalid variable
-    // We request all valid variable just need to be a symbol,you should promise:
-    //The first character of a variable name cannot be a digit or any character from the set: {.@}
-    //If a string can be recognized as a number, it will be prioritized as a number. For example: 1, -1, +123, .123, +124., 1e-3
-    //Variable names can overlap with primitives and reserve_words
-    //Variable names can contain any non-whitespace characters except #, ', ", `, but the first character cannot be a digit
-    //When a variable is not defined in the current scope, your interpreter should output RuntimeError
-     if (!x.empty()) {
+    if (!x.empty()) {
         char first = x[0];
         if (isdigit(first) || first == '.' || first == '@')
             throw RuntimeError("Invalid variable name: starts with digit or {.@}");
@@ -100,13 +93,22 @@ Value Var::eval(Assoc &e) { // evaluation of variable
                     {E_MODULO,   {new Modulo(new Var("parm1"), new Var("parm2")), {"parm1","parm2"}}},
                     {E_EXPT,     {new Expt(new Var("parm1"), new Var("parm2")), {"parm1","parm2"}}},
                     {E_EQQ,      {new EqualVar({}), {}}},
+                    {E_LT,       {new LessVar({}), {}}},
+                    {E_LE,       {new LessEqVar({}), {}}},
+                    {E_GT,       {new GreaterVar({}), {}}},
+                    {E_GE,       {new GreaterEqVar({}), {}}},
+                    {E_AND,      {new AndVar({}), {}}},
+                    {E_OR,       {new OrVar({}), {}}},
+                    {E_NOT,      {new Not(new Var("parm")), {"parm"}}},
+                    {E_CONS,     {new Cons(new Var("parm1"), new Var("parm2")), {"parm1","parm2"}}},
+                    {E_CAR,      {new Car(new Var("parm")), {"parm"}}},
+                    {E_CDR,      {new Cdr(new Var("parm")), {"parm"}}},
+                    {E_LIST,     {new ListFunc({}), {}}},
+                    {E_LISTQ,    {new IsList(new Var("parm")), {"parm"}}},
             };
 
             auto it = primitive_map.find(primitives[x]);
-            //TOD0:to PASS THE parameters correctly;
-            //COMPLETE THE CODE WITH THE HINT IN IF SENTENCE WITH CORRECT RETURN VALUE            
             if (it != primitive_map.end()) {
-                //TODO
                 const auto &pair = it->second;
                 const Expr &expr = pair.first;
                 const std::vector<std::string> &params = pair.second;
@@ -593,8 +595,25 @@ static Value syntaxToValue(const Syntax &syn) {
     if (auto list = dynamic_cast<List*>(base)) {
         if (list->stxs.empty())
             return NullV();
+        
+        // 检查是否是点对表示法 (a . b)
+        // 点对表示法应该有3个元素: 第一个元素, 点符号, 最后一个元素
+        if (list->stxs.size() >= 3) {
+            // 检查中间是否有点符号
+            for (size_t i = 1; i < list->stxs.size() - 1; ++i) {
+                if (auto dotSym = dynamic_cast<SymbolSyntax*>(list->stxs[i].ptr.get())) {
+                    if (dotSym->s == ".") {
+                        // 找到点对表示法
+                        Value car = syntaxToValue(list->stxs[0]);
+                        Value cdr = syntaxToValue(list->stxs[list->stxs.size() - 1]);
+                        return PairV(car, cdr);
+                    }
+                }
+            }
+        }
+        
+        // 普通列表
         Value result = NullV();
-        // 从尾到头构建 Pair
         for (int i = (int)list->stxs.size() - 1; i >= 0; --i) {
             result = PairV(syntaxToValue(list->stxs[i]), result);
         }
@@ -665,11 +684,7 @@ Value Cond::eval(Assoc &env) {
 }
 
 Value Lambda::eval(Assoc &env) { 
-    std::vector<std::string> params;
-    for (size_t i = 0; i < x.size(); ++i) {
-        params.push_back(x[i]);
-    }
-    return Value(new Procedure(params, e, env));
+    return Value(new Procedure(x, e, env, is_variadic));
 }
 
 Value Apply::eval(Assoc &e) {
@@ -686,19 +701,26 @@ Value Apply::eval(Assoc &e) {
 
     Assoc param_env = clos_ptr->env;
     size_t fixed_param_count = clos_ptr->parameters.size();
-    bool is_variadic = false;
-    if (!clos_ptr->parameters.empty() && clos_ptr->parameters.back() == "...") {
-        is_variadic = true;
-        fixed_param_count--;
+    bool is_variadic = clos_ptr->is_variadic;
+
+    // 参数数量检查
+    if (!is_variadic && args.size() != fixed_param_count) {
+        throw RuntimeError("Argument count mismatch: expected " + 
+                          std::to_string(fixed_param_count) + 
+                          ", got " + std::to_string(args.size()));
+    }
+    if (is_variadic && args.size() < fixed_param_count) {
+        throw RuntimeError("Argument count mismatch: expected at least " + 
+                          std::to_string(fixed_param_count) + 
+                          ", got " + std::to_string(args.size()));
     }
 
-    if (!is_variadic && args.size() != fixed_param_count) {
-        throw RuntimeError("Argument count mismatch");
-    }
+    // 绑定固定参数
     for (size_t i = 0; i < fixed_param_count; ++i) {
         param_env = extend(clos_ptr->parameters[i], args[i], param_env);
     }
 
+    // 处理可变参数
     if (is_variadic) {
         std::vector<Value> var_args;
         for (size_t i = fixed_param_count; i < args.size(); ++i) {
@@ -706,13 +728,16 @@ Value Apply::eval(Assoc &e) {
         }
 
         Value var_list = NullV();
-        for (size_t i = var_args.size(); i-- > 0;) {
-            var_list = PairV(var_args[i], var_list);
+        for (auto it = var_args.rbegin(); it != var_args.rend(); ++it) {
+            var_list = PairV(*it, var_list);
         }
 
-        std::string var_param_name = clos_ptr->parameters.back();
-        param_env = extend(var_param_name, var_list, param_env);
+        if (!clos_ptr->parameters.empty()) {
+            std::string var_param_name = clos_ptr->parameters.back();
+            param_env = extend(var_param_name, var_list, param_env);
+        }
     }
+    
     return clos_ptr->e->eval(param_env);
 }
 

@@ -165,6 +165,9 @@ Apply::Apply(const Expr &expr, const vector<Expr> &vec) : ExprBase(E_APPLY), rat
 
 Lambda::Lambda(const vector<string> &vec, const Expr &expr) : ExprBase(E_LAMBDA), x(vec), e(expr) {}
 
+Lambda::Lambda(const std::vector<std::string> &params, const Expr &body, bool variadic)
+    : ExprBase(E_LAMBDA), x(params), e(body), is_variadic(variadic) {}
+
 Define::Define(const string &variable, const Expr &expr) : ExprBase(E_DEFINE), var(variable), e(expr) {}
 
 //BINDING CONSTRUCTS
