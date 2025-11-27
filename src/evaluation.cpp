@@ -571,6 +571,7 @@ Value Begin::eval(Assoc &e) {
     return result;
 }
 
+static Value buildListFromSyntax(const std::vector<Syntax> &stxs, size_t start);
 
 static Value syntaxToValue(const Syntax &syn) {
     SyntaxBase *base = syn.get();
@@ -596,31 +597,42 @@ static Value syntaxToValue(const Syntax &syn) {
         if (list->stxs.empty())
             return NullV();
         
-        // 检查是否是点对表示法 (a . b)
-        // 点对表示法应该有3个元素: 第一个元素, 点符号, 最后一个元素
-        if (list->stxs.size() >= 3) {
-            // 检查中间是否有点符号
-            for (size_t i = 1; i < list->stxs.size() - 1; ++i) {
-                if (auto dotSym = dynamic_cast<SymbolSyntax*>(list->stxs[i].ptr.get())) {
-                    if (dotSym->s == ".") {
-                        // 找到点对表示法
-                        Value car = syntaxToValue(list->stxs[0]);
-                        Value cdr = syntaxToValue(list->stxs[list->stxs.size() - 1]);
-                        return PairV(car, cdr);
-                    }
+        // 递归构建列表，处理点对表示法
+        return buildListFromSyntax(list->stxs, 0);
+    }
+    return VoidV();
+}
+
+// 辅助函数：递归构建列表，处理点对
+static Value buildListFromSyntax(const std::vector<Syntax> &stxs, size_t start) {
+    if (start >= stxs.size()) {
+        return NullV();
+    }
+    
+    // 只在特定的语法模式下检查点对表示法
+    // 对于 quote 内部的列表，应该更保守地处理点对
+    if (start + 2 < stxs.size()) {
+        if (auto dotSym = dynamic_cast<SymbolSyntax*>(stxs[start + 1].ptr.get())) {
+            if (dotSym->s == ".") {
+                // 只有在明确的点对语法时才创建点对
+                // 检查是否是有效的点对格式 (a . b)
+                Value car = syntaxToValue(stxs[start]);
+                Value cdr = syntaxToValue(stxs[start + 2]);
+                
+                // 如果后面没有更多元素，才是真正的点对
+                if (start + 3 == stxs.size()) {
+                    return PairV(car, cdr);
                 }
             }
         }
-        
-        // 普通列表
-        Value result = NullV();
-        for (int i = (int)list->stxs.size() - 1; i >= 0; --i) {
-            result = PairV(syntaxToValue(list->stxs[i]), result);
-        }
-        return result;
     }
-    return VoidV(); // fallback
+    
+    // 普通列表：递归构建
+    Value car = syntaxToValue(stxs[start]);
+    Value cdr = buildListFromSyntax(stxs, start + 1);
+    return PairV(car, cdr);
 }
+
 
 Value Quote::eval(Assoc& e) {
     return syntaxToValue(s);
