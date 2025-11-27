@@ -11,6 +11,7 @@
 #include "value.hpp"
 #include "expr.hpp" 
 #include "RE.hpp"
+#include "Def.hpp"
 #include "syntax.hpp"
 #include <cstring>
 #include <vector>
@@ -92,7 +93,7 @@ Value Var::eval(Assoc &e) { // evaluation of variable
                     {E_DIV,      {new DivVar({}),   {}}},
                     {E_MODULO,   {new Modulo(new Var("parm1"), new Var("parm2")), {"parm1","parm2"}}},
                     {E_EXPT,     {new Expt(new Var("parm1"), new Var("parm2")), {"parm1","parm2"}}},
-                    {E_EQQ,      {new EqualVar({}), {}}},
+                    {E_EQ,       {new EqualVar({}), {}}},
                     {E_LT,       {new LessVar({}), {}}},
                     {E_LE,       {new LessEqVar({}), {}}},
                     {E_GT,       {new GreaterVar({}), {}}},
@@ -642,20 +643,22 @@ Value AndVar::eval(Assoc &e) { // and with short-circuit evaluation
     if (rands.empty()) return BooleanV(true);
     for (size_t i = 0; i < rands.size(); ++i) {
         Value v = rands[i]->eval(e);
-        if (v->v_type == ValueType::V_BOOL && !((Boolean*)v.get())->b)
-            return BooleanV(false);
+        if (v->v_type == ValueType::V_BOOL && !((Boolean*)v.get())->b) {
+            return BooleanV(false);  // 遇到 #f 立即返回
+        }
     }
-    return rands.back()->eval(e);
+    return rands.back()->eval(e);  // 返回最后一个值
 }
 
 Value OrVar::eval(Assoc &e) { // or with short-circuit evaluation
     if (rands.empty()) return BooleanV(false);
     for (size_t i = 0; i < rands.size(); ++i) {
         Value v = rands[i]->eval(e);
-        if (v->v_type == ValueType::V_BOOL && ((Boolean*)v.get())->b)
-            return v;
+        if (v->v_type != ValueType::V_BOOL || ((Boolean*)v.get())->b) {
+            return v;  // 返回第一个真值
+        }
     }
-    return BooleanV(false);
+    return BooleanV(false);  // 所有值都是假值，返回 #f
 }
 
 Value Not::evalRator(const Value &rand) { // not
@@ -793,6 +796,6 @@ Value Display::evalRator(const Value &rand) { // display function
     } else {
         rand->show(std::cout);
     }
-    
+
     return VoidV();
 }

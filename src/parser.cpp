@@ -224,6 +224,18 @@ Expr List::parse(Assoc &env) {
             case E_EXIT: if (stxs.size()!=1) throw RuntimeError("exit takes no args"); return Expr(new Exit());
             case E_DISPLAY: if (ps.size()!=1) throw RuntimeError("display requires 1"); return Expr(new Display(ps[0]));
             case E_NOT: if (ps.size()!=1) throw RuntimeError("not requires 1"); return Expr(new Not(ps[0]));
+            case E_AND: {
+                vector<Expr> es;
+                for (size_t i = 1; i < stxs.size(); ++i)
+                    es.push_back(stxs[i].parse(env));
+                return Expr(new AndVar(es));
+            }
+            case E_OR: {
+                vector<Expr> es;
+                for (size_t i = 1; i < stxs.size(); ++i)
+                    es.push_back(stxs[i].parse(env));
+                return Expr(new OrVar(es));
+            }
             default: throw RuntimeError("unknown primitive op " + op);
         }
     }
