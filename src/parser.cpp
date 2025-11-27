@@ -1,3 +1,9 @@
+/**
+ * @file parser.cpp
+ * @brief Syntax tree parsing and transformation implementation
+ * @brief 语法树解析和转换实现
+ */
+
 #include "RE.hpp"
 #include "Def.hpp"
 #include "syntax.hpp"
@@ -5,20 +11,15 @@
 #include "expr.hpp"
 #include <map>
 #include <string>
+#include <iostream>
 #include <vector>
-
-using std::string;
-using std::vector;
+#include <utility>
 
 extern std::map<std::string, ExprType> primitives;
 extern std::map<std::string, ExprType> reserved_words;
 
-/******************************
- * 基本语法节点 Parse
- ******************************/
-
 Expr Syntax::parse(Assoc &env) {
-    return ptr->parse(env);
+    throw RuntimeError("Parse method not implemented");
 }
 
 Expr Number::parse(Assoc &env) {
@@ -29,6 +30,14 @@ Expr RationalSyntax::parse(Assoc &env) {
     return Expr(new RationalNum(numerator, denominator));
 }
 
+Expr SymbolSyntax::parse(Assoc &env) {
+    return Expr(new Var(s));
+}
+
+Expr StringSyntax::parse(Assoc &env) {
+    return Expr(new StringExpr(s));
+}
+
 Expr TrueSyntax::parse(Assoc &env) {
     return Expr(new True());
 }
@@ -37,247 +46,308 @@ Expr FalseSyntax::parse(Assoc &env) {
     return Expr(new False());
 }
 
-Expr StringSyntax::parse(Assoc &env) {
-    return Expr(new StringExpr(s));
-}
-
-Expr SymbolSyntax::parse(Assoc &env) {
-    return Expr(new Var(s));
-}
-
-/*********************************************
- * 核心：List::parse
- *********************************************/
 Expr List::parse(Assoc &env) {
     if (stxs.empty()) {
         return Expr(new Quote(Syntax(new List())));
     }
 
-    SyntaxBase *headPtr = stxs[0].ptr.get();
-    SymbolSyntax *headSym = dynamic_cast<SymbolSyntax*>(headPtr);
-
-    if (!headSym) {
-        Expr rator = stxs[0].parse(env);
-        vector<Expr> args;
-        for (size_t i = 1; i < stxs.size(); ++i)
-            args.push_back(stxs[i].parse(env));
-        return Expr(new Apply(rator, args));
-    }
-
-    string op = headSym->s;
-    
-
-
-
-
-    bool is_bound = false;
-Value bound_value = find(op, env);
-if (bound_value.get()) {
-    is_bound = true;
-}
-
-
-
-// 新增：检查是否是 lambda 参数（即使值为 null）
-if (!is_bound) {
-    // 检查环境中是否有这个变量名（即使值为 null）
-    // 这表示它是一个参数名
-    for (auto i = env; i.get() != nullptr; i = i->next) {
-        if (i->x == op) {
-            is_bound = true;
-            break;
+    SymbolSyntax *id = dynamic_cast<SymbolSyntax*>(stxs[0].get());
+    if (id == nullptr) {
+        std::vector<Expr> parameters;
+        for (size_t i = 1; i < stxs.size(); i++) {
+            parameters.push_back(stxs[i]->parse(env));
         }
-    }
-}
-
-
-    if (!is_bound && reserved_words.count(op)) {
-        ExprType kw = reserved_words[op];
-        switch (kw) {
-            case E_IF:
-                if (stxs.size() != 4) throw RuntimeError("if requires 3 args");
-                return Expr(new If(
-                    stxs[1].parse(env),
-                    stxs[2].parse(env),
-                    stxs[3].parse(env)
-                ));
-            case E_BEGIN: {
-                vector<Expr> es;
-                for (size_t i = 1; i < stxs.size(); ++i)
-                    es.push_back(stxs[i].parse(env));
-                return Expr(new Begin(es));
+        return Expr(new Apply(stxs[0]->parse(env), parameters));
+    } else {
+        std::string op = id->s;
+        if (find(op, env).get() != nullptr) {
+            std::vector<Expr> parameters;
+            for (size_t i = 1; i < stxs.size(); i++) {
+                parameters.push_back(stxs[i].get()->parse(env));
             }
-            case E_QUOTE:
-                if (stxs.size() != 2) throw RuntimeError("quote requires 1 arg");
-                return Expr(new Quote(stxs[1]));
-
-
-
-
-            case E_LAMBDA: {
-                if (stxs.size() < 3) throw RuntimeError("lambda needs params & body");
-    
-    vector<string> params;
-    bool is_variadic = false;
-    
-    List *plist = dynamic_cast<List*>(stxs[1].ptr.get());
-    if (!plist) throw RuntimeError("lambda parameters must be list");
-
-    for (size_t i = 0; i < plist->stxs.size(); ++i) {
-        if (auto sym = dynamic_cast<SymbolSyntax*>(plist->stxs[i].ptr.get())) {
-            if (sym->s == "..." && i == plist->stxs.size() - 1) {
-                is_variadic = true;
+            return Expr(new Apply(stxs[0].get()->parse(env), parameters));
+        }
+        
+        if (primitives.count(op) != 0) {
+            std::vector<Expr> parameters;
+            for (int i = 1; i < stxs.size(); i++) {
+                parameters.push_back(stxs[i].get()->parse(env));
+            }
+            
+            ExprType op_type = primitives[op];
+            if (op_type == E_PLUS) {
+                if (parameters.size() == 0) {
+                    return Expr(new PlusVar(parameters));
+                } else if (parameters.size() == 1) {
+                    return parameters[0];
+                } else if (parameters.size() == 2) {
+                    return Expr(new Plus(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new PlusVar(parameters));
+                }
+            } else if (op_type == E_MINUS) {
+                if (parameters.size() == 0) {
+                    throw RuntimeError("Insufficient arguments for subtraction");
+                } else if (parameters.size() == 1) {
+                    return Expr(new MinusVar(parameters));
+                } else if (parameters.size() == 2) {
+                    return Expr(new Minus(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new MinusVar(parameters));
+                }
+            } else if (op_type == E_MUL) {
+                if (parameters.size() == 0) {
+                    return Expr(new MultVar(parameters));
+                } else if (parameters.size() == 1) {
+                    return parameters[0];
+                } else if (parameters.size() == 2) {
+                    return Expr(new Mult(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new MultVar(parameters));
+                }
+            } else if (op_type == E_DIV) {
+                if (parameters.size() == 0) {
+                    throw RuntimeError("Insufficient arguments for division");
+                } else if (parameters.size() == 1) {
+                    return Expr(new DivVar(parameters));
+                } else if (parameters.size() == 2) {
+                    return Expr(new Div(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new DivVar(parameters));
+                }
+            } else if (op_type == E_MODULO) {
+                if (parameters.size() != 2) {
+                    throw RuntimeError("Modulo requires exactly two arguments");
+                }
+                return Expr(new Modulo(parameters[0], parameters[1]));
+            } else if (op_type == E_LIST) {
+                return Expr(new ListFunc(parameters));
+            } else if (op_type == E_LT) {
+                if (parameters.size() < 2) {
+                    throw RuntimeError("Less than requires at least two arguments");
+                } else if (parameters.size() == 2) {
+                    return Expr(new Less(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new LessVar(parameters));
+                }
+            } else if (op_type == E_LE) {
+                if (parameters.size() < 2) {
+                    throw RuntimeError("Less equal requires at least two arguments");
+                } else if (parameters.size() == 2) {
+                    return Expr(new LessEq(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new LessEqVar(parameters));
+                }
+            } else if (op_type == E_EQ) {
+                if (parameters.size() < 2) {
+                    throw RuntimeError("Equal requires at least two arguments");
+                } else if (parameters.size() == 2) {
+                    return Expr(new Equal(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new EqualVar(parameters));
+                }
+            } else if (op_type == E_GE) {
+                if (parameters.size() < 2) {
+                    throw RuntimeError("Greater equal requires at least two arguments");
+                } else if (parameters.size() == 2) {
+                    return Expr(new GreaterEq(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new GreaterEqVar(parameters));
+                }
+            } else if (op_type == E_GT) {
+                if (parameters.size() < 2) {
+                    throw RuntimeError("Greater than requires at least two arguments");
+                } else if (parameters.size() == 2) {
+                    return Expr(new Greater(parameters[0], parameters[1]));
+                } else {
+                    return Expr(new GreaterVar(parameters));
+                }
+            } else if (op_type == E_AND) {
+                return Expr(new AndVar(parameters));
+            } else if (op_type == E_OR) {
+                return Expr(new OrVar(parameters));
             } else {
-                params.push_back(sym->s);
+                return Expr(new Apply(stxs[0].get()->parse(env), parameters));
             }
-        } else {
-            throw RuntimeError("lambda param must be symbol");
         }
-    }
 
-    // 创建包含参数名的新环境用于解析函数体
-    Assoc body_env = env;
-    for (const auto& param : params) {
-        // 将参数名标记为已绑定（即使值还是null）
-        body_env = extend(param, Value(nullptr), body_env);
-    }
-
-    Expr body(nullptr);
-    if (stxs.size() == 3)
-        body = stxs[2].parse(body_env);  // 使用新的环境
-    else {
-        vector<Expr> bs;
-        for (size_t i = 2; i < stxs.size(); ++i)
-            bs.push_back(stxs[i].parse(body_env));  // 使用新的环境
-        body = Expr(new Begin(bs));
-    }
-    return Expr(new Lambda(params, body, is_variadic));
-}
-
-
-
-            case E_DEFINE: {
-                if (stxs.size() != 3) throw RuntimeError("define requires 2 args");
-                SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(stxs[1].ptr.get());
-                if (!sym) throw RuntimeError("define expects symbol");
-                return Expr(new Define(sym->s, stxs[2].parse(env)));
-            }
-            case E_SET: {
-                if (stxs.size() != 3) throw RuntimeError("set! requires 2 args");
-                SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(stxs[1].ptr.get());
-                if (!sym) throw RuntimeError("set! expects symbol");
-                return Expr(new Set(sym->s, stxs[2].parse(env)));
-            }
-            case E_LET:
-            case E_LETREC: {
-                if (stxs.size() < 3) throw RuntimeError("let/letrec requires bindings & body");
-
-                List *bl = dynamic_cast<List*>(stxs[1].ptr.get());
-                if (!bl) throw RuntimeError("let/letrec bindings must be list");
-
-                vector<std::pair<string, Expr>> binds;
-                for (auto &b : bl->stxs) {
-                    List *pairList = dynamic_cast<List*>(b.ptr.get());
-                    if (!pairList || pairList->stxs.size() != 2)
-                        throw RuntimeError("each let/letrec binding must be (id expr)");
-                    SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(pairList->stxs[0].ptr.get());
-                    if (!sym) throw RuntimeError("binding first element must be symbol");
+        if (reserved_words.count(op) != 0) {
+            switch (reserved_words[op]) {
+                case E_BEGIN: {
+                    std::vector<Expr> passed_exprs;
+                    for (size_t i = 1; i < stxs.size(); i++) {
+                        passed_exprs.push_back(stxs[i]->parse(env));
+                    }
+                    return Expr(new Begin(passed_exprs));
+                }
+                case E_QUOTE: {
+                    if (stxs.size() != 2) throw RuntimeError("Quote requires exactly one argument");
+                    return Expr(new Quote(stxs[1]));
+                }
+                case E_IF: {
+                    if (stxs.size() != 4) throw RuntimeError("If requires three arguments");
+                    return Expr(new If(stxs[1]->parse(env), stxs[2]->parse(env), stxs[3]->parse(env)));
+                }
+                case E_COND: {
+                    if (stxs.size() < 2) throw RuntimeError("Cond requires at least one clause");
+                    std::vector<std::vector<Expr>> clauses;
+                    for (size_t i = 1; i < stxs.size(); i++) {
+                        List* clause_list = dynamic_cast<List*>(stxs[i].get());
+                        if (clause_list == nullptr || clause_list->stxs.empty()) {
+                            throw RuntimeError("Invalid cond clause structure");
+                        }
+                        std::vector<Expr> clause_exprs;
+                        for (auto& clause_stx : clause_list->stxs) {
+                            clause_exprs.push_back(clause_stx->parse(env));
+                        }
+                        clauses.push_back(clause_exprs);
+                    }
+                    return Expr(new Cond(clauses));
+                }
+                case E_LAMBDA: {
+                    if (stxs.size() < 3) throw RuntimeError("Lambda requires parameters and body");
+                    Assoc New_env = env;
+                    std::vector<std::string> vars;
+                    List* paras_ptr = dynamic_cast<List*>(stxs[1].get());
+                    if (paras_ptr == nullptr) {
+                        throw RuntimeError("Invalid lambda parameter list");
+                    }
+                    for (int i = 0; i < paras_ptr->stxs.size(); i++) {
+                        if (auto tmp_var = dynamic_cast<Var*>(paras_ptr->stxs[i].get()->parse(env).get())) {
+                            vars.push_back(tmp_var->x);
+                            New_env = extend(tmp_var->x, NullV(), New_env);
+                        } else {
+                            throw RuntimeError("Invalid parameter in lambda");
+                        }
+                    }
                     
-                    binds.push_back({sym->s, pairList->stxs[1].parse(env)});
+                    if (stxs.size() == 3) {
+                        return Expr(new Lambda(vars, stxs[2].get()->parse(New_env)));
+                    } else {
+                        std::vector<Expr> body_exprs;
+                        for (size_t i = 2; i < stxs.size(); i++) {
+                            body_exprs.push_back(stxs[i]->parse(New_env));
+                        }
+                        return Expr(new Lambda(vars, Expr(new Begin(body_exprs))));
+                    }
                 }
-
-                vector<Expr> body;
-                for (size_t i = 2; i < stxs.size(); ++i)
-                    body.push_back(stxs[i].parse(env));
-                Expr bodyExpr = (body.size() == 1 ? body[0] : Expr(new Begin(body)));
-
-                if (kw == E_LET) return Expr(new Let(binds, bodyExpr));
-                else return Expr(new Letrec(binds, bodyExpr));
-            }
-            case E_COND: {
-                vector<vector<Expr>> clauses;
-                for (size_t i = 1; i < stxs.size(); ++i) {
-                    List *cl = dynamic_cast<List*>(stxs[i].ptr.get());
-                    if (!cl || cl->stxs.size() < 2) throw RuntimeError("malformed cond clause");
-                    vector<Expr> ce;
-                    for (auto &e : cl->stxs) ce.push_back(e.parse(env));
-                    clauses.push_back(ce);
+                case E_DEFINE: {
+                    if (stxs.size() < 3) throw RuntimeError("Define requires variable and expression");
+                    
+                    List *func_def_list = dynamic_cast<List*>(stxs[1].get());
+                    if (func_def_list != nullptr) {
+                        if (func_def_list->stxs.empty()) {
+                            throw RuntimeError("Function definition requires name and parameters");
+                        }
+                        
+                        SymbolSyntax *func_name = dynamic_cast<SymbolSyntax*>(func_def_list->stxs[0].get());
+                        if (func_name == nullptr) {
+                            throw RuntimeError("Invalid function name in define");
+                        }
+                        
+                        std::vector<std::string> param_names;
+                        for (size_t i = 1; i < func_def_list->stxs.size(); i++) {
+                            SymbolSyntax *param = dynamic_cast<SymbolSyntax*>(func_def_list->stxs[i].get());
+                            if (param == nullptr) {
+                                throw RuntimeError("Invalid parameter in function definition");
+                            }
+                            param_names.push_back(param->s);
+                        }
+                        
+                        if (stxs.size() == 3) {
+                            Expr lambda_expr = Expr(new Lambda(param_names, stxs[2]->parse(env)));
+                            return Expr(new Define(func_name->s, lambda_expr));
+                        } else {
+                            std::vector<Expr> body_exprs;
+                            for (size_t i = 2; i < stxs.size(); i++) {
+                                body_exprs.push_back(stxs[i]->parse(env));
+                            }
+                            Expr lambda_expr = Expr(new Lambda(param_names, Expr(new Begin(body_exprs))));
+                            return Expr(new Define(func_name->s, lambda_expr));
+                        }
+                    } else {
+                        if (stxs.size() != 3) throw RuntimeError("Variable define requires exactly two arguments");
+                        SymbolSyntax *var_id = dynamic_cast<SymbolSyntax*>(stxs[1].get());
+                        if (var_id == nullptr) {
+                            throw RuntimeError("Invalid variable name in define");
+                        }
+                        return Expr(new Define(var_id->s, stxs[2]->parse(env)));
+                    }
                 }
-                return Expr(new Cond(clauses));
+                case E_LET: {
+                    if (stxs.size() != 3) throw RuntimeError("Let requires bindings and body");
+                    std::vector<std::pair<std::string, Expr>> binded_vector;
+                    List *binder_list_ptr = dynamic_cast<List*>(stxs[1].get());
+                    if (binder_list_ptr == nullptr) {
+                        throw RuntimeError("Invalid let binding list");
+                    }
+
+                    Assoc local_env = env;
+                    for (int i = 0; i < binder_list_ptr->stxs.size(); i++) {
+                        auto pair_it = dynamic_cast<List*>(binder_list_ptr->stxs[i].get());
+                        if ((pair_it == nullptr) || (pair_it->stxs.size() != 2)) {
+                            throw RuntimeError("Invalid let binding format");
+                        }
+                        auto Identifiers = dynamic_cast<SymbolSyntax*>(pair_it->stxs.front().get());
+                        if (Identifiers == nullptr) {
+                            throw RuntimeError("Invalid identifier in let binding");
+                        }
+                        Expr temp_expr = pair_it->stxs.back().get()->parse(env);
+                        local_env = extend(Identifiers->s, NullV(), local_env);
+                        std::pair<std::string, Expr> tmp_pair = std::make_pair(Identifiers->s, temp_expr);
+                        binded_vector.push_back(tmp_pair);
+                    }
+                    return Expr(new Let(binded_vector, stxs[2]->parse(local_env)));
+                }
+                case E_LETREC: {
+                    if (stxs.size() != 3) throw RuntimeError("Letrec requires bindings and body");
+                    std::vector<std::pair<std::string, Expr>> binded_vector;
+                    List *binder_list_ptr = dynamic_cast<List*>(stxs[1].get());
+                    if (binder_list_ptr == nullptr) {
+                        throw RuntimeError("Invalid letrec binding list");
+                    }
+                    
+                    Assoc temp_env = env;
+                    
+                    for (auto &stx_tobind_raw : binder_list_ptr->stxs) {
+                        List *stx_tobind = dynamic_cast<List*>(stx_tobind_raw.get());
+                        if (stx_tobind == nullptr || stx_tobind->stxs.size() != 2) {
+                            throw RuntimeError("Invalid letrec binding format");
+                        }
+                        SymbolSyntax *temp_id = dynamic_cast<SymbolSyntax*>(stx_tobind->stxs[0].get());
+                        if (temp_id == nullptr) {
+                            throw RuntimeError("Invalid identifier in letrec binding");
+                        }
+                        temp_env = extend(temp_id->s, NullV(), temp_env);
+                    }
+                    
+                    for (auto &stx_tobind_raw : binder_list_ptr->stxs) {
+                        List *stx_tobind = dynamic_cast<List*>(stx_tobind_raw.get());
+                        SymbolSyntax *temp_id = dynamic_cast<SymbolSyntax*>(stx_tobind->stxs[0].get());
+                        Expr temp_store = stx_tobind->stxs[1]->parse(temp_env);
+                        binded_vector.push_back(std::make_pair(temp_id->s, temp_store));
+                    }
+                    
+                    return Expr(new Letrec(binded_vector, stxs[2]->parse(temp_env)));
+                }
+                case E_SET: {
+                    if (stxs.size() != 3) throw RuntimeError("Set requires variable and expression");
+                    SymbolSyntax *var_id = dynamic_cast<SymbolSyntax*>(stxs[1].get());
+                    if (var_id == nullptr) {
+                        throw RuntimeError("Invalid variable name in set");
+                    }
+                    return Expr(new Set(var_id->s, stxs[2]->parse(env)));
+                }
+                default:
+                    throw RuntimeError("Unknown reserved word: " + op);
             }
-            case E_AND: {
-                vector<Expr> es;
-                for (size_t i = 1; i < stxs.size(); ++i)
-                    es.push_back(stxs[i].parse(env));
-                return Expr(new AndVar(es));
-            }
-            case E_OR: {
-                vector<Expr> es;
-                for (size_t i = 1; i < stxs.size(); ++i)
-                    es.push_back(stxs[i].parse(env));
-                return Expr(new OrVar(es));
-            }
-            default:
-                throw RuntimeError("unknown keyword " + op);
         }
-    }
 
-    if (!is_bound && primitives.count(op)) {
-        vector<Expr> ps;
-        for (size_t i = 1; i < stxs.size(); ++i)
-            ps.push_back(stxs[i].parse(env));
-
-        ExprType t = primitives[op];
-        switch (t) {
-            case E_PLUS: return Expr(new PlusVar(ps));
-            case E_MINUS: return Expr(new MinusVar(ps));
-            case E_MUL: return Expr(new MultVar(ps));
-            case E_DIV: return Expr(new DivVar(ps));
-            case E_LT: return Expr(new LessVar(ps));
-            case E_LE: return Expr(new LessEqVar(ps));
-            case E_EQ: return Expr(new EqualVar(ps));
-            case E_GE: return Expr(new GreaterEqVar(ps));
-            case E_GT: return Expr(new GreaterVar(ps));
-            case E_LIST: return Expr(new ListFunc(ps));
-            case E_VOID: if (ps.size()!=0) throw RuntimeError("void requires 1");return Expr(new MakeVoid());
-            case E_EXPT: if (ps.size()!=2) throw RuntimeError("expt requires 2"); return Expr(new Expt(ps[0], ps[1]));
-            case E_MODULO: if (ps.size()!=2) throw RuntimeError("modulo requires 2"); return Expr(new Modulo(ps[0], ps[1]));
-            case E_CONS: if (ps.size()!=2) throw RuntimeError("cons requires 2"); return Expr(new Cons(ps[0], ps[1]));
-            case E_CAR: if (ps.size()!=1) throw RuntimeError("car requires 1"); return Expr(new Car(ps[0]));
-            case E_CDR: if (ps.size()!=1) throw RuntimeError("cdr requires 1"); return Expr(new Cdr(ps[0]));
-            case E_BOOLQ: if (ps.size()!=1) throw RuntimeError("boolean? requires 1"); return Expr(new IsBoolean(ps[0]));
-            case E_INTQ: if (ps.size()!=1) throw RuntimeError("integer? requires 1"); return Expr(new IsFixnum(ps[0]));
-            case E_STRINGQ: if (ps.size()!=1) throw RuntimeError("string? requires 1"); return Expr(new IsString(ps[0]));
-            case E_SYMBOLQ: if (ps.size()!=1) throw RuntimeError("symbol? requires 1"); return Expr(new IsSymbol(ps[0]));
-            case E_LISTQ: if (ps.size()!=1) throw RuntimeError("list? requires 1"); return Expr(new IsList(ps[0]));
-            case E_EQQ: if (ps.size()!=2) throw RuntimeError("eq? requires 2"); return Expr(new IsEq(ps[0], ps[1]));
-            case E_PAIRQ: if (ps.size()!=1) throw RuntimeError("pair? requires 1"); return Expr(new IsPair(ps[0]));
-            case E_PROCQ: if (ps.size()!=1) throw RuntimeError("procedure? requires 1"); return Expr(new IsProcedure(ps[0]));
-            case E_NULLQ: if (ps.size()!=1) throw RuntimeError("null? requires 1"); return Expr(new IsNull(ps[0]));
-            case E_EXIT: if (stxs.size()!=1) throw RuntimeError("exit takes no args"); return Expr(new Exit());
-            case E_DISPLAY: if (ps.size()!=1) throw RuntimeError("display requires 1"); return Expr(new Display(ps[0]));
-            case E_NOT: if (ps.size()!=1) throw RuntimeError("not requires 1"); return Expr(new Not(ps[0]));
-            case E_AND: {
-                vector<Expr> es;
-                for (size_t i = 1; i < stxs.size(); ++i)
-                    es.push_back(stxs[i].parse(env));
-                return Expr(new AndVar(es));
-            }
-            case E_OR: {
-                vector<Expr> es;
-                for (size_t i = 1; i < stxs.size(); ++i)
-                    es.push_back(stxs[i].parse(env));
-                return Expr(new OrVar(es));
-            }
-            default: throw RuntimeError("unknown primitive op " + op);
+        Expr opexpr = stxs[0]->parse(env);
+        std::vector<Expr> to_expr;
+        for (size_t i = 1; i < stxs.size(); i++) {
+            to_expr.push_back(stxs[i]->parse(env));
         }
-    }
-
-    {
-        Expr rator = stxs[0].parse(env);
-        vector<Expr> args;
-        for (size_t i = 1; i < stxs.size(); ++i)
-            args.push_back(stxs[i].parse(env));
-        return Expr(new Apply(rator, args));
+        return Expr(new Apply(opexpr, to_expr));
     }
 }
