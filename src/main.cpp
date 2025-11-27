@@ -59,26 +59,15 @@ void REPL(){
             Value val = expr -> eval(global_env);
             if (val -> v_type == V_TERMINATE)
                 break;
-            
-            if (val -> v_type != V_VOID) {
-                val -> show(std :: cout); // value print
-                puts("");  // 只有显示值时才换行
-            } else {
-                // 对于 void 值，不显示任何内容，但保持提示符的整洁
-                #ifndef ONLINE_JUDGE
-                    // 在交互模式下，void 后直接显示新提示符
-                #else
-                    // 在非交互模式下，void 后什么都不做
-                #endif
-            }
+            val -> show(std :: cout); // value print
         }
         catch (const RuntimeError &RE){
             #ifndef ONLINE_JUDGE
                 std :: cout << RE.message();
             #endif
             std :: cout << "RuntimeError";
-            puts("");
         }
+        puts("");
     }
 }
 
