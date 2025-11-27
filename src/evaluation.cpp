@@ -86,6 +86,7 @@ Value Var::eval(Assoc &e) { // evaluation of variable
                     {E_PROCQ,    {new IsProcedure(new Var("parm")), {"parm"}}},
                     {E_SYMBOLQ,  {new IsSymbol(new Var("parm")), {"parm"}}},
                     {E_STRINGQ,  {new IsString(new Var("parm")), {"parm"}}},
+                    {E_EQQ,      {new IsEq(new Var("parm1"), new Var("parm2")), {"parm1","parm2"}}},
                     {E_DISPLAY,  {new Display(new Var("parm")), {"parm"}}},
                     {E_PLUS,     {new PlusVar({}),  {}}},
                     {E_MINUS,    {new MinusVar({}), {}}},
@@ -700,15 +701,32 @@ Value Cond::eval(Assoc &env) {
                 isElse = true;
             }
         }
-        if (isElse ||
-            (clause[0]->eval(env)->v_type == ValueType::V_BOOL &&
-             ((Boolean*)clause[0]->eval(env).get())->b) ||
-            (clause[0]->eval(env)->v_type != ValueType::V_BOOL)) {
+        
+        if (isElse) {
+            // else 分支总是执行
             Value result = VoidV();
             for (size_t i = 1; i < clause.size(); ++i) {
                 result = clause[i]->eval(env);
             }
             return result;
+        } else {
+            // 普通分支：求值条件
+            Value condVal = clause[0]->eval(env);
+            bool truthy = true;
+            
+            // 只有布尔值#f是假值，其他所有值都是真值
+            if (condVal->v_type == ValueType::V_BOOL) {
+                truthy = ((Boolean*)condVal.get())->b;
+            }
+            // 非布尔值自动为真
+            
+            if (truthy) {
+                Value result = VoidV();
+                for (size_t i = 1; i < clause.size(); ++i) {
+                    result = clause[i]->eval(env);
+                }
+                return result;
+            }
         }
     }
     return VoidV();
@@ -725,6 +743,21 @@ Value Apply::eval(Assoc &e) {
     if (proc_val->v_type == V_PROC) {
         Procedure* clos_ptr = dynamic_cast<Procedure*>(proc_val.get());
         if (!clos_ptr) throw RuntimeError("Invalid procedure closure");
+        
+        size_t fixed_param_count = clos_ptr->parameters.size();
+        bool is_variadic = clos_ptr->is_variadic;
+
+        // 参数数量检查移到所有分支之前
+        if (!is_variadic && rand.size() != fixed_param_count) {
+            throw RuntimeError("Argument count mismatch: expected " + 
+                              std::to_string(fixed_param_count) + 
+                              ", got " + std::to_string(rand.size()));
+        }
+        if (is_variadic && rand.size() < fixed_param_count) {
+            throw RuntimeError("Argument count mismatch: expected at least " + 
+                              std::to_string(fixed_param_count) + 
+                              ", got " + std::to_string(rand.size()));
+        }
         
         // 检查是否是原始过程包装的 Procedure
         if (auto prim_proc = dynamic_cast<Variadic*>(clos_ptr->e.get())) {
@@ -759,20 +792,6 @@ Value Apply::eval(Assoc &e) {
         }
 
         Assoc param_env = clos_ptr->env;
-        size_t fixed_param_count = clos_ptr->parameters.size();
-        bool is_variadic = clos_ptr->is_variadic;
-
-        // 参数数量检查
-        if (!is_variadic && args.size() != fixed_param_count) {
-            throw RuntimeError("Argument count mismatch: expected " + 
-                              std::to_string(fixed_param_count) + 
-                              ", got " + std::to_string(args.size()));
-        }
-        if (is_variadic && args.size() < fixed_param_count) {
-            throw RuntimeError("Argument count mismatch: expected at least " + 
-                              std::to_string(fixed_param_count) + 
-                              ", got " + std::to_string(args.size()));
-        }
 
         // 绑定固定参数
         for (size_t i = 0; i < fixed_param_count; ++i) {

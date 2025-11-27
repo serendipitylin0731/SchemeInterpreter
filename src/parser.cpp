@@ -66,11 +66,30 @@ Expr List::parse(Assoc &env) {
 
     string op = headSym->s;
     
+
+
+
+
     bool is_bound = false;
-    Value bound_value = find(op, env);
-    if (bound_value.get() != nullptr) {
-        is_bound = true;
+Value bound_value = find(op, env);
+if (bound_value.get()) {
+    is_bound = true;
+}
+
+
+
+// 新增：检查是否是 lambda 参数（即使值为 null）
+if (!is_bound) {
+    // 检查环境中是否有这个变量名（即使值为 null）
+    // 这表示它是一个参数名
+    for (auto i = env; i.get() != nullptr; i = i->next) {
+        if (i->x == op) {
+            is_bound = true;
+            break;
+        }
     }
+}
+
 
     if (!is_bound && reserved_words.count(op)) {
         ExprType kw = reserved_words[op];
@@ -91,38 +110,52 @@ Expr List::parse(Assoc &env) {
             case E_QUOTE:
                 if (stxs.size() != 2) throw RuntimeError("quote requires 1 arg");
                 return Expr(new Quote(stxs[1]));
+
+
+
+
             case E_LAMBDA: {
                 if (stxs.size() < 3) throw RuntimeError("lambda needs params & body");
-                
-                vector<string> params;
-                bool is_variadic = false;
-                
-                List *plist = dynamic_cast<List*>(stxs[1].ptr.get());
-                if (!plist) throw RuntimeError("lambda parameters must be list");
+    
+    vector<string> params;
+    bool is_variadic = false;
+    
+    List *plist = dynamic_cast<List*>(stxs[1].ptr.get());
+    if (!plist) throw RuntimeError("lambda parameters must be list");
 
-                for (size_t i = 0; i < plist->stxs.size(); ++i) {
-                    if (auto sym = dynamic_cast<SymbolSyntax*>(plist->stxs[i].ptr.get())) {
-                        if (sym->s == "..." && i == plist->stxs.size() - 1) {
-                            is_variadic = true;
-                        } else {
-                            params.push_back(sym->s);
-                        }
-                    } else {
-                        throw RuntimeError("lambda param must be symbol");
-                    }
-                }
-
-                Expr body(nullptr);
-                if (stxs.size() == 3)
-                    body = stxs[2].parse(env);
-                else {
-                    vector<Expr> bs;
-                    for (size_t i = 2; i < stxs.size(); ++i)
-                        bs.push_back(stxs[i].parse(env));
-                    body = Expr(new Begin(bs));
-                }
-                return Expr(new Lambda(params, body, is_variadic));
+    for (size_t i = 0; i < plist->stxs.size(); ++i) {
+        if (auto sym = dynamic_cast<SymbolSyntax*>(plist->stxs[i].ptr.get())) {
+            if (sym->s == "..." && i == plist->stxs.size() - 1) {
+                is_variadic = true;
+            } else {
+                params.push_back(sym->s);
             }
+        } else {
+            throw RuntimeError("lambda param must be symbol");
+        }
+    }
+
+    // 创建包含参数名的新环境用于解析函数体
+    Assoc body_env = env;
+    for (const auto& param : params) {
+        // 将参数名标记为已绑定（即使值还是null）
+        body_env = extend(param, Value(nullptr), body_env);
+    }
+
+    Expr body(nullptr);
+    if (stxs.size() == 3)
+        body = stxs[2].parse(body_env);  // 使用新的环境
+    else {
+        vector<Expr> bs;
+        for (size_t i = 2; i < stxs.size(); ++i)
+            bs.push_back(stxs[i].parse(body_env));  // 使用新的环境
+        body = Expr(new Begin(bs));
+    }
+    return Expr(new Lambda(params, body, is_variadic));
+}
+
+
+
             case E_DEFINE: {
                 if (stxs.size() != 3) throw RuntimeError("define requires 2 args");
                 SymbolSyntax *sym = dynamic_cast<SymbolSyntax*>(stxs[1].ptr.get());
