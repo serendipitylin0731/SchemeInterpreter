@@ -113,7 +113,23 @@ Value Var::eval(Assoc &e) { // evaluation of variable
                 const auto &pair = it->second;
                 const Expr &expr = pair.first;
                 const std::vector<std::string> &params = pair.second;
-                return Value(new Procedure(params, expr, e));
+                bool is_variadic = false;
+                if (dynamic_cast<PlusVar*>(expr.get()) || 
+                    dynamic_cast<MinusVar*>(expr.get()) ||
+                    dynamic_cast<MultVar*>(expr.get()) ||
+                    dynamic_cast<DivVar*>(expr.get()) ||
+                    dynamic_cast<EqualVar*>(expr.get()) ||
+                    dynamic_cast<LessVar*>(expr.get()) ||
+                    dynamic_cast<LessEqVar*>(expr.get()) ||
+                    dynamic_cast<GreaterVar*>(expr.get()) ||
+                    dynamic_cast<GreaterEqVar*>(expr.get()) ||
+                    dynamic_cast<AndVar*>(expr.get()) ||
+                    dynamic_cast<OrVar*>(expr.get()) ||
+                    dynamic_cast<ListFunc*>(expr.get())) {
+                    is_variadic = true;
+                }
+                
+                return Value(new Procedure(params, expr, e, is_variadic));
             }
       }
       throw RuntimeError("Undefined variable: " + x);
@@ -704,56 +720,87 @@ Value Lambda::eval(Assoc &env) {
 
 Value Apply::eval(Assoc &e) {
     Value proc_val = rator->eval(e);
-    if (proc_val->v_type != V_PROC) {
-        throw RuntimeError("Attempt to apply a non-procedure");
-    }
-    Procedure* clos_ptr = dynamic_cast<Procedure*>(proc_val.get());
-    if (!clos_ptr) throw RuntimeError("Invalid procedure closure");
-    std::vector<Value> args;
-    for (auto &arg_expr : rand) {
-        args.push_back(arg_expr->eval(e));
-    }
-
-    Assoc param_env = clos_ptr->env;
-    size_t fixed_param_count = clos_ptr->parameters.size();
-    bool is_variadic = clos_ptr->is_variadic;
-
-    // 参数数量检查
-    if (!is_variadic && args.size() != fixed_param_count) {
-        throw RuntimeError("Argument count mismatch: expected " + 
-                          std::to_string(fixed_param_count) + 
-                          ", got " + std::to_string(args.size()));
-    }
-    if (is_variadic && args.size() < fixed_param_count) {
-        throw RuntimeError("Argument count mismatch: expected at least " + 
-                          std::to_string(fixed_param_count) + 
-                          ", got " + std::to_string(args.size()));
-    }
-
-    // 绑定固定参数
-    for (size_t i = 0; i < fixed_param_count; ++i) {
-        param_env = extend(clos_ptr->parameters[i], args[i], param_env);
-    }
-
-    // 处理可变参数
-    if (is_variadic) {
-        std::vector<Value> var_args;
-        for (size_t i = fixed_param_count; i < args.size(); ++i) {
-            var_args.push_back(args[i]);
+    
+    // 处理用户定义的过程
+    if (proc_val->v_type == V_PROC) {
+        Procedure* clos_ptr = dynamic_cast<Procedure*>(proc_val.get());
+        if (!clos_ptr) throw RuntimeError("Invalid procedure closure");
+        
+        // 检查是否是原始过程包装的 Procedure
+        if (auto prim_proc = dynamic_cast<Variadic*>(clos_ptr->e.get())) {
+            std::vector<Value> args;
+            for (auto &arg_expr : rand) {
+                args.push_back(arg_expr->eval(e));
+            }
+            return prim_proc->evalRator(args);
+        }
+        
+        if (auto bin_proc = dynamic_cast<Binary*>(clos_ptr->e.get())) {
+            if (rand.size() != 2) {
+                throw RuntimeError("Binary procedure expects 2 arguments, got " + std::to_string(rand.size()));
+            }
+            Value arg1 = rand[0]->eval(e);
+            Value arg2 = rand[1]->eval(e);
+            return bin_proc->evalRator(arg1, arg2);
+        }
+        
+        if (auto unary_proc = dynamic_cast<Unary*>(clos_ptr->e.get())) {
+            if (rand.size() != 1) {
+                throw RuntimeError("Unary procedure expects 1 argument, got " + std::to_string(rand.size()));
+            }
+            Value arg = rand[0]->eval(e);
+            return unary_proc->evalRator(arg);
+        }
+        
+        // 处理普通用户定义过程
+        std::vector<Value> args;
+        for (auto &arg_expr : rand) {
+            args.push_back(arg_expr->eval(e));
         }
 
-        Value var_list = NullV();
-        for (auto it = var_args.rbegin(); it != var_args.rend(); ++it) {
-            var_list = PairV(*it, var_list);
+        Assoc param_env = clos_ptr->env;
+        size_t fixed_param_count = clos_ptr->parameters.size();
+        bool is_variadic = clos_ptr->is_variadic;
+
+        // 参数数量检查
+        if (!is_variadic && args.size() != fixed_param_count) {
+            throw RuntimeError("Argument count mismatch: expected " + 
+                              std::to_string(fixed_param_count) + 
+                              ", got " + std::to_string(args.size()));
+        }
+        if (is_variadic && args.size() < fixed_param_count) {
+            throw RuntimeError("Argument count mismatch: expected at least " + 
+                              std::to_string(fixed_param_count) + 
+                              ", got " + std::to_string(args.size()));
         }
 
-        if (!clos_ptr->parameters.empty()) {
-            std::string var_param_name = clos_ptr->parameters.back();
-            param_env = extend(var_param_name, var_list, param_env);
+        // 绑定固定参数
+        for (size_t i = 0; i < fixed_param_count; ++i) {
+            param_env = extend(clos_ptr->parameters[i], args[i], param_env);
         }
+
+        // 处理可变参数
+        if (is_variadic) {
+            std::vector<Value> var_args;
+            for (size_t i = fixed_param_count; i < args.size(); ++i) {
+                var_args.push_back(args[i]);
+            }
+
+            Value var_list = NullV();
+            for (auto it = var_args.rbegin(); it != var_args.rend(); ++it) {
+                var_list = PairV(*it, var_list);
+            }
+
+            if (!clos_ptr->parameters.empty()) {
+                std::string var_param_name = clos_ptr->parameters.back();
+                param_env = extend(var_param_name, var_list, param_env);
+            }
+        }
+        
+        return clos_ptr->e->eval(param_env);
     }
     
-    return clos_ptr->e->eval(param_env);
+    throw RuntimeError("Attempt to apply a non-procedure");
 }
 
 Value Define::eval(Assoc &env) {
