@@ -824,7 +824,17 @@ Value Apply::eval(Assoc &e) {
 
 Value Define::eval(Assoc &env) {
     Value val = e->eval(env);
-    modify(var, val, env);
+    
+    // 检查变量是否已存在
+    Value existing = find(var, env);
+    if (existing.get() != nullptr) {
+        // 变量存在，修改它
+        modify(var, val, env);
+    } else {
+        // 变量不存在，创建新绑定
+        env = extend(var, val, env);
+    }
+    
     return VoidV();
 }
 
