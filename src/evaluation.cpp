@@ -111,16 +111,36 @@ Value Var::eval(Assoc &e) {
             }
             
             std::vector<std::string> parameters_;
-            if (dynamic_cast<Binary*>(exp.get()) || 
-                dynamic_cast<LessVar*>(exp.get()) ||
-                dynamic_cast<LessEqVar*>(exp.get()) ||
-                dynamic_cast<EqualVar*>(exp.get()) ||
-                dynamic_cast<GreaterEqVar*>(exp.get()) ||
-                dynamic_cast<GreaterVar*>(exp.get())) {
+            
+            // 处理可变参数操作符
+            if (dynamic_cast<PlusVar*>(exp.get()) != nullptr ||
+                dynamic_cast<MinusVar*>(exp.get()) != nullptr ||
+                dynamic_cast<MultVar*>(exp.get()) != nullptr ||
+                dynamic_cast<DivVar*>(exp.get()) != nullptr ||
+                dynamic_cast<LessVar*>(exp.get()) != nullptr ||
+                dynamic_cast<LessEqVar*>(exp.get()) != nullptr ||
+                dynamic_cast<EqualVar*>(exp.get()) != nullptr ||
+                dynamic_cast<GreaterEqVar*>(exp.get()) != nullptr ||
+                dynamic_cast<GreaterVar*>(exp.get()) != nullptr ||
+                dynamic_cast<AndVar*>(exp.get()) != nullptr ||
+                dynamic_cast<OrVar*>(exp.get()) != nullptr ||
+                dynamic_cast<ListFunc*>(exp.get()) != nullptr) {
+                // 可变参数操作符：使用单个参数名表示可变参数
+                parameters_.push_back("args");
+            }
+            // 处理二元操作符
+            else if (dynamic_cast<Binary*>(exp.get())) {
                 parameters_.push_back("parm1");
                 parameters_.push_back("parm2");
-            } else if (dynamic_cast<Unary*>(exp.get())) {
+            } 
+            // 处理一元操作符
+            else if (dynamic_cast<Unary*>(exp.get())) {
                 parameters_.push_back("parm");
+            }
+            // 处理无参数操作符（如 void, exit）
+            else {
+                // 无参数操作符
+                parameters_ = std::vector<std::string>();
             }
             
             return ProcedureV(parameters_, exp, e);
@@ -1058,14 +1078,37 @@ Value Apply::eval(Assoc &e) {
         args.push_back(rand[i]->eval(e));
     }
 
-    if (args.size() != clos_ptr->parameters.size()) {throw RuntimeError("Wrong number of arguments");}
-
-    Assoc param_env = clos_ptr->env;
-    for (int i = 0; i < clos_ptr->parameters.size(); i++) {
-        param_env = extend(clos_ptr->parameters[i], args[i], param_env);
+    // 检查参数数量 - 对于可变参数操作符，允许任意数量的参数
+    if (clos_ptr->parameters.size() == 1 && clos_ptr->parameters[0] == "args") {
+        // 可变参数操作符，接受任意数量的参数
+        // 不需要检查参数数量
+    } else if (args.size() != clos_ptr->parameters.size()) {
+        throw RuntimeError("Wrong number of arguments");
     }
 
-    return clos_ptr->e->eval(param_env);
+    Assoc param_env = clos_ptr->env;
+    
+    // 对于可变参数操作符，直接调用 Variadic 的 eval 方法
+    if (clos_ptr->parameters.size() == 1 && clos_ptr->parameters[0] == "args") {
+        Variadic* variadic_op = dynamic_cast<Variadic*>(clos_ptr->e.get());
+        if (variadic_op != nullptr) {
+            return variadic_op->evalRator(args);
+        } else {
+            // 如果不是 Variadic 类型，回退到原来的环境扩展方式
+            Value args_list = NullV();
+            for (int i = args.size() - 1; i >= 0; i--) {
+                args_list = PairV(args[i], args_list);
+            }
+            param_env = extend("args", args_list, param_env);
+            return clos_ptr->e->eval(param_env);
+        }
+    } else {
+        // 固定参数的情况
+        for (int i = 0; i < clos_ptr->parameters.size(); i++) {
+            param_env = extend(clos_ptr->parameters[i], args[i], param_env);
+        }
+        return clos_ptr->e->eval(param_env);
+    }
 }
 
 Value Define::eval(Assoc &env) {
