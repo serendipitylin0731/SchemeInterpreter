@@ -535,7 +535,7 @@ Value IsEq::evalRator(const Value &rand1, const Value &rand2) { // eq?
         return BooleanV(rand1.get() == rand2.get());
     }
 }
-
+//
 Value IsBoolean::evalRator(const Value &rand) { // boolean?
     return BooleanV(rand->v_type == V_BOOL);
 }
